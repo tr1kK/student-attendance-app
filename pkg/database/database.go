@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"log"
 	"student-attendance-app/pkg/models"
-	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func InitDB(url string) (*gorm.DB, error) {
@@ -18,57 +17,114 @@ func InitDB(url string) (*gorm.DB, error) {
 	}
 
 	// Run migrations
-	if err := db.AutoMigrate(&models.User{}, &models.Lesson{}, &models.Attendance{}, &models.GeneratedCode{}); err != nil {
-		return nil, fmt.Errorf("failed to migrate database: %w", err)
+	if err := db.AutoMigrate(
+		&models.Group{},
+		&models.User{},
+		&models.Lesson{},
+		&models.Attendance{},
+		&models.GeneratedCode{},
+	); err != nil {
+		log.Fatalf("failed to migrate database: %v", err)
 	}
 
-	// Seed the database
 	seedDatabase(db)
 
 	return db, nil
 }
 
 func seedDatabase(db *gorm.DB) {
-	// Seed users
+	// Seed Groups if they don't exist
+	groups := []models.Group{
+		{Name: "Group A"},
+		{Name: "Group B"},
+		{Name: "Group C"},
+	}
+	for _, group := range groups {
+		db.FirstOrCreate(&group, models.Group{Name: group.Name})
+	}
+	log.Println("Groups seeded.")
+
+	// Seed Users
 	seedUsers(db)
-	// Seed lessons
+
+	// Seed Lessons
 	seedLessons(db)
 }
 
 func seedUsers(db *gorm.DB) {
-	users := []models.User{
-		{StudentID: "stu001", Name: "Иванов И.И.", Role: "student", Password: hashPassword("12345")},
-		{StudentID: "stu002", Name: "Петрова А.А.", Role: "student", Password: hashPassword("23456")},
-		{StudentID: "teach001", Name: "Преподаватель С.С.", Role: "teacher", Password: hashPassword("admin1")},
+	users := []struct {
+		Identifier string
+		Password   string // Plaintext password
+		Name       string
+		Email      string
+		Role       string
+		GroupName  string // Group name to find ID
+	}{
+		// Password: 12345
+		{Identifier: "student001", Password: "12345", Name: "Test Student", Email: "student@test.com", Role: "student", GroupName: "Group A"},
+		// Password: admin1
+		{Identifier: "teacher001", Password: "admin1", Name: "Test Teacher", Email: "teacher@test.com", Role: "teacher", GroupName: "Group B"},
+		// Password: rootpass
+		{Identifier: "admin001", Password: "rootpass", Name: "Test Admin", Email: "admin@test.com", Role: "admin", GroupName: "Group C"},
 	}
 
-	for _, user := range users {
+	for _, u := range users {
+		// Check if user already exists
 		var existingUser models.User
-		if db.First(&existingUser, "student_id = ?", user.StudentID).Error == gorm.ErrRecordNotFound {
+		if db.First(&existingUser, "identifier = ?", u.Identifier).Error == gorm.ErrRecordNotFound {
+			// Find group to get its ID
+			var group models.Group
+			if err := db.First(&group, "name = ?", u.GroupName).Error; err != nil {
+				log.Printf("Could not find group %s for user %s: %v", u.GroupName, u.Identifier, err)
+				continue
+			}
+
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
+			if err != nil {
+				log.Printf("Failed to hash password for user %s: %v", u.Identifier, err)
+				continue
+			}
+
+			user := models.User{
+				Identifier: u.Identifier,
+				Password:   string(hashedPassword),
+				Name:       u.Name,
+				Email:      u.Email,
+				Role:       u.Role,
+				GroupID:    &group.ID,
+			}
 			if err := db.Create(&user).Error; err != nil {
-				log.Printf("failed to seed user %s: %v", user.StudentID, err)
+				log.Printf("Failed to create user %s: %v", u.Identifier, err)
+			} else {
+				log.Printf("User %s created.", u.Identifier)
 			}
 		}
 	}
 }
 
 func seedLessons(db *gorm.DB) {
+	// Get group IDs
+	var groupA, groupB, groupC models.Group
+	db.First(&groupA, "name = ?", "Group A")
+	db.First(&groupB, "name = ?", "Group B")
+	db.First(&groupC, "name = ?", "Group C")
+
 	lessons := []models.Lesson{
-		{Name: "Математика", Day: "Понедельник", Time: "09:00-10:30", Teacher: "Преподаватель С.С.", Room: "101"},
-		{Name: "Физика", Day: "Понедельник", Time: "10:45-12:15", Teacher: "Преподаватель С.С.", Room: "102"},
-		{Name: "Химия", Day: "Вторник", Time: "09:00-10:30", Teacher: "Преподаватель С.С.", Room: "103"},
-		{Name: "Биология", Day: "Вторник", Time: "10:45-12:15", Teacher: "Преподаватель С.С.", Room: "104"},
-		{Name: "История", Day: "Среда", Time: "09:00-10:30", Teacher: "Преподаватель С.С.", Room: "105"},
+		// Group A
+		{Name: "Алгебра", Day: "Понедельник", Time: "09:00-10:30", Teacher: "Анна Владимировна", Room: "101", GroupID: &groupA.ID},
+		{Name: "История", Day: "Понедельник", Time: "12:30-14:00", Teacher: "Иван Петрович", Room: "203", GroupID: &groupA.ID},
+		{Name: "Геометрия", Day: "Вторник", Time: "10:45-12:15", Teacher: "Анна Владимировна", Room: "101", GroupID: &groupA.ID},
+		// Group B
+		{Name: "Физика", Day: "Среда", Time: "09:00-10:30", Teacher: "Петр Сидорович", Room: "203", GroupID: &groupB.ID},
+		{Name: "Химия", Day: "Четверг", Time: "12:30-14:00", Teacher: "Мария Ивановна", Room: "305", GroupID: &groupB.ID},
+		// Group C
+		{Name: "Информатика", Day: "Пятница", Time: "10:45-12:15", Teacher: "Сергей Николаевич", Room: "404", GroupID: &groupC.ID},
 	}
 
 	for _, lesson := range lessons {
-		var existingLesson models.Lesson
-		if db.First(&existingLesson, "name = ? AND day = ? AND time = ?", lesson.Name, lesson.Day, lesson.Time).Error == gorm.ErrRecordNotFound {
-			if err := db.Create(&lesson).Error; err != nil {
-				log.Printf("failed to seed lesson %s: %v", lesson.Name, err)
-			}
-		}
+		db.FirstOrCreate(&lesson, models.Lesson{Name: lesson.Name, Day: lesson.Day, Time: lesson.Time})
 	}
+	log.Println("Lessons seeded.")
 }
 
 func hashPassword(password string) string {
@@ -77,4 +133,4 @@ func hashPassword(password string) string {
 		log.Panic(err)
 	}
 	return string(bytes)
-} 
+}

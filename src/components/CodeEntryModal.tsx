@@ -33,7 +33,7 @@ const CodeEntryModal = ({ lesson, isOpen, onClose, onSubmit }: CodeEntryModalPro
     <div className="modal-overlay">
       <div className="modal">
         <div className="modal-header">
-          <h3>Отметить посещение</h3>
+          <h3>Ввод кода для занятия</h3>
           <button className="close-btn" onClick={onClose}>&times;</button>
         </div>
         <div className="modal-body">
@@ -49,7 +49,7 @@ const CodeEntryModal = ({ lesson, isOpen, onClose, onSubmit }: CodeEntryModalPro
                 type="text"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder="00000"
+                placeholder="Введите код"
                 maxLength={5}
                 className="code-input"
               />
@@ -60,7 +60,7 @@ const CodeEntryModal = ({ lesson, isOpen, onClose, onSubmit }: CodeEntryModalPro
                 Отмена
               </button>
               <button type="submit" className="btn-primary">
-                Отметить посещение
+                Отправить
               </button>
             </div>
           </form>

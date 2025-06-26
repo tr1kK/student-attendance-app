@@ -1,33 +1,46 @@
 // src/types/index.ts
 
+export interface Group {
+  id: number;
+  name: string;
+}
+
+export interface User {
+  id: number;
+  identifier: string;
+  name: string;
+  email: string;
+  role: 'student' | 'teacher' | 'admin';
+  group_id?: number;
+  group?: Group;
+}
+
 export interface Lesson {
-  id: string;
+  id: number;
   name: string;
   day: string;
   time: string;
   teacher: string;
   room: string;
+  group_id?: number;
+  group?: Group;
 }
 
 export interface AttendanceRecord {
-  id: string;
-  lessonId: string;
-  lessonName: string;
-  studentId: string;
-  studentName: string;
-  timestamp: string;
-  code: string;
+  id: number;
+  lesson_id: number;
+  student_id: number;
+  submitted_at: string;
+  lesson: Lesson;
+  student: User;
 }
 
 export interface GeneratedCode {
-  id: string;
-  lessonId: string;
-  lessonName: string;
+  id: number;
+  lesson_id: number;
   code: string;
-  teacherId: string;
-  createdAt: string;
-  expiresAt: string;
-  isActive: boolean;
+  expires_at: string;
+  is_active: boolean;
 }
 
 export interface WeeklySchedule {

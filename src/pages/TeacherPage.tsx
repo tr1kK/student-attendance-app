@@ -3,133 +3,160 @@ import { useNavigate } from 'react-router-dom';
 import Schedule from '../components/Schedule';
 import CodeDisplayModal from '../components/CodeDisplayModal';
 import AttendanceList from '../components/AttendanceList';
-import { getCurrentUser } from '../utils/auth';
-import { 
-  getLessonAttendanceRecords, 
-  saveGeneratedCode, 
-  getActiveCodeForLesson,
-  deactivateCode,
-  generateRandomCode,
-  getGeneratedCodes,
-  createNewCodeForLesson
-} from '../utils/storage';
-import { postMessage } from '../utils/broadcast';
-import type { Lesson, AttendanceRecord, GeneratedCode } from '../types';
+import * as api from '../utils/api';
+import type { Lesson, AttendanceRecord, GeneratedCode, User } from '../types';
 
 const TeacherPage = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [lessons, setLessons] = useState<Lesson[]>([]);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
-  const [currentCode, setCurrentCode] = useState<string>('');
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
-  const [activeCode, setActiveCode] = useState<GeneratedCode | null>(null);
+  const [currentCode, setCurrentCode] = useState<GeneratedCode | null>(null);
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [message, setMessage] = useState('');
+  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
-  const currentUser = getCurrentUser();
-
+  
   useEffect(() => {
-    if (!currentUser || currentUser.role !== 'teacher') {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      setUser(JSON.parse(storedUser));
+    } else {
       navigate('/');
-      return;
     }
-  }, [currentUser, navigate]);
+
+    const fetchLessons = async () => {
+      try {
+        const data = await api.getLessons();
+        setLessons(data);
+      } catch (err) {
+        setError('Не удалось загрузить расписание.');
+        console.error(err);
+      }
+    };
+
+    fetchLessons();
+  }, [navigate]);
 
   useEffect(() => {
     if (!selectedLesson) return;
-
-    const intervalId = setInterval(() => {
-      const records = getLessonAttendanceRecords(selectedLesson.id);
-      if (JSON.stringify(records) !== JSON.stringify(attendanceRecords)) {
-        setAttendanceRecords(records);
+    const intervalId = setInterval(async () => {
+      try {
+        const data = await api.getLessonAttendance(selectedLesson.id);
+        setAttendanceRecords(data);
+      } catch (error) {
+        console.error('Failed to fetch attendance:', error);
       }
-    }, 2000); 
+    }, 3000); // Poll every 3 seconds
 
     return () => clearInterval(intervalId);
-  }, [selectedLesson, attendanceRecords]);
+  }, [selectedLesson]);
 
-  const handleLessonClick = (lesson: Lesson) => {
+  const handleLessonClick = async (lesson: Lesson) => {
     setSelectedLesson(lesson);
-    
-    // Check for an existing active code, otherwise create a new one.
-    let codeToDisplay = getActiveCodeForLesson(lesson.id);
-    if (!codeToDisplay) {
-      codeToDisplay = createNewCodeForLesson(lesson.id, lesson.name, currentUser!.id);
+    try {
+      const code = await api.generateCode(lesson.id);
+      setCurrentCode(code);
+      setIsCodeModalOpen(true);
+      const records = await api.getLessonAttendance(lesson.id);
+      setAttendanceRecords(records);
+    } catch (error: any) {
+      console.error('Failed to generate code:', error);
+      setMessage(error.message || 'Failed to start lesson.');
     }
-    
-    setActiveCode(codeToDisplay);
-    setCurrentCode(codeToDisplay.code);
-    setIsCodeModalOpen(true);
-
-    // Broadcast the updated state of all codes
-    const allCodes = getGeneratedCodes();
-    postMessage({ type: 'SYNC_CODES', payload: allCodes });
-
-    // Load attendance records for this lesson
-    const records = getLessonAttendanceRecords(lesson.id);
-    setAttendanceRecords(records);
   };
 
-  const handleStopCode = () => {
-    if (activeCode) {
-      deactivateCode(activeCode.id);
+  const handleGenerateCode = async (lesson: Lesson) => {
+    setSelectedLesson(lesson);
+    setAttendanceRecords([]); // Clear old records
+    try {
+      setError('');
+      setMessage('');
+      const response = await api.generateCode(lesson.id);
+      setGeneratedCode(response.code);
+      setMessage(`Код для занятия '${lesson.name}' сгенерирован.`);
+      setIsModalOpen(true);
+      const records = await api.getLessonAttendance(lesson.id);
+      setAttendanceRecords(records);
+    } catch (error: any) {
+      setError(error.message || 'Не удалось сгенерировать код.');
+    }
+  };
 
-      // Broadcast the entire state of codes
-      const allCodes = getGeneratedCodes();
-      postMessage({ type: 'SYNC_CODES', payload: allCodes });
-      
-      setActiveCode(null);
-      setCurrentCode('');
-      setIsCodeModalOpen(false);
-      setMessage('Код деактивирован');
+  const handleStopCode = async () => {
+    if (!selectedLesson) return;
+    try {
+      await api.deactivateCode(selectedLesson.id);
+      setMessage(`Код для занятия '${selectedLesson.name}' остановлен.`);
+      setIsModalOpen(false);
+      setGeneratedCode(null);
+    } catch (err: any) {
+      setError(err.message || 'Не удалось остановить код.');
+    }
+  };
+
+  const handleRefreshAttendance = async () => {
+    if (!selectedLesson) return;
+    try {
+      setMessage('Обновление списка...');
+      const records = await api.getLessonAttendance(selectedLesson.id);
+      setAttendanceRecords(records);
+      setMessage('Список посещаемости обновлен.');
+    } catch (err) {
+      setError('Не удалось обновить список.');
+    } finally {
       setTimeout(() => setMessage(''), 3000);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('currentUser');
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
     navigate('/');
   };
 
-  if (!currentUser) return null;
-
   return (
-    <div className="teacher-page">
-      <header className="page-header">
-        <h1>Страница преподавателя</h1>
+    <div className="container">
+      <header>
+        <h1>Портал преподавателя</h1>
         <div className="user-info">
-          <span>Добро пожаловать, {currentUser.name}</span>
-          <button onClick={handleLogout} className="logout-btn">
-            Выйти
-          </button>
+          <span>Добро пожаловать, {user?.name || 'Преподаватель'}</span>
+          <button onClick={handleLogout} className="logout-button">Выйти</button>
         </div>
       </header>
-
-      {message && (
-        <div className={`message ${message.includes('деактивирован') ? 'success' : 'error'}`}>
-          {message}
-        </div>
-      )}
-
-      <div className="page-content">
-        <Schedule 
-          onLessonClick={handleLessonClick}
-          showActions={true}
-          userRole="teacher"
-        />
-
+      <main>
+        {message && <p className="message success">{message}</p>}
+        {error && <p className="error">{error}</p>}
+        <Schedule lessons={lessons} onLessonClick={handleGenerateCode} userRole="teacher" />
         {selectedLesson && (
-          <AttendanceList 
-            attendanceRecords={attendanceRecords}
-            lessonName={selectedLesson.name}
-          />
+          <div className="attendance-section">
+            <div className="attendance-header">
+              <h3>Посещаемость: {selectedLesson.name}</h3>
+              <button onClick={handleRefreshAttendance} className="btn-secondary">Обновить список</button>
+            </div>
+            <AttendanceList attendanceRecords={attendanceRecords} />
+          </div>
         )}
-      </div>
+      </main>
 
       {selectedLesson && currentCode && (
         <CodeDisplayModal
           lesson={selectedLesson}
-          code={currentCode}
+          code={currentCode.code}
           isOpen={isCodeModalOpen}
           onClose={() => setIsCodeModalOpen(false)}
+          onStop={() => setIsCodeModalOpen(false)} // Stop functionality can be enhanced later
+        />
+      )}
+
+      {isModalOpen && selectedLesson && generatedCode && (
+        <CodeDisplayModal
+          lesson={selectedLesson}
+          code={generatedCode}
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
           onStop={handleStopCode}
         />
       )}

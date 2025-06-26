@@ -1,24 +1,4 @@
-package router
-
-import (
-	"net/http"
-	"student-attendance-app/pkg/config"
-	"student-attendance-app/pkg/handlers"
-	"student-attendance-app/pkg/middleware"
-	"time"
-
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
-
-	// Swagger
-	_ "student-attendance-app/docs"
-
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
-)
-
-const swaggerJSON = `{
+{
     "swagger": "2.0",
     "info": {
         "description": "Это сервер для приложения по учету посещаемости студентов.",
@@ -51,7 +31,7 @@ const swaggerJSON = `{
                 "tags": [
                     "admin"
                 ],
-                "summary": "Получить все группы (Админ)",
+                "summary": "Получить все группы",
                 "responses": {
                     "200": {
                         "description": "Список групп",
@@ -86,7 +66,7 @@ const swaggerJSON = `{
                 "tags": [
                     "admin"
                 ],
-                "summary": "Получить всех пользователей (Админ)",
+                "summary": "Получить всех пользователей",
                 "responses": {
                     "200": {
                         "description": "Список пользователей",
@@ -122,7 +102,7 @@ const swaggerJSON = `{
                 "tags": [
                     "admin"
                 ],
-                "summary": "Создать пользователя (Админ)",
+                "summary": "Создать пользователя",
                 "parameters": [
                     {
                         "description": "Объект пользователя",
@@ -175,7 +155,7 @@ const swaggerJSON = `{
                 "tags": [
                     "admin"
                 ],
-                "summary": "Обновить пользователя (Админ)",
+                "summary": "Обновить пользователя",
                 "parameters": [
                     {
                         "type": "integer",
@@ -898,90 +878,4 @@ const swaggerJSON = `{
             "in": "header"
         }
     }
-}`
-
-func SetupRouter(r *gin.Engine, db *gorm.DB) {
-	// Configure CORS
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:5174", "http://localhost:5175"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
-
-	// Load config
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		panic(err)
-	}
-
-	// Swagger endpoint
-	r.GET("/swagger.json", func(c *gin.Context) {
-		c.String(http.StatusOK, swaggerJSON)
-	})
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler, ginSwagger.URL("/swagger.json")))
-
-	// Public routes
-	r.GET("/groups", func(c *gin.Context) {
-		handlers.GetGroups(c, db)
-	})
-
-	authRoutes := r.Group("/auth")
-	{
-		authRoutes.POST("/login", func(c *gin.Context) {
-			handlers.Login(c, db, cfg)
-		})
-		authRoutes.POST("/register", func(c *gin.Context) {
-			handlers.Register(c, db, cfg)
-		})
-	}
-
-	// Authenticated routes
-	api := r.Group("/api")
-	api.Use(middleware.AuthMiddleware(cfg))
-	{
-		// Lesson routes (accessible to all authenticated users)
-		api.GET("/lessons", func(c *gin.Context) {
-			handlers.GetLessons(c, db)
-		})
-
-		// Student routes
-		studentRoutes := api.Group("/student")
-		studentRoutes.Use(middleware.RoleMiddleware("student"))
-		{
-			studentRoutes.POST("/attendance", func(c *gin.Context) {
-				handlers.SubmitAttendance(c, db)
-			})
-			studentRoutes.GET("/attendance", func(c *gin.Context) {
-				handlers.GetStudentAttendance(c, db)
-			})
-		}
-
-		// Teacher routes
-		teacherRoutes := api.Group("/teacher")
-		teacherRoutes.Use(middleware.RoleMiddleware("teacher"))
-		{
-			teacherRoutes.POST("/lessons/:lessonId/code", func(c *gin.Context) {
-				handlers.GenerateCode(c, db)
-			})
-			teacherRoutes.DELETE("/lessons/:lessonId/code", func(c *gin.Context) {
-				handlers.DeactivateCode(c, db)
-			})
-			teacherRoutes.GET("/attendance/:lessonId", func(c *gin.Context) {
-				handlers.GetLessonAttendance(c, db)
-			})
-		}
-
-		// Admin routes
-		adminRoutes := api.Group("/admin")
-		adminRoutes.Use(middleware.RoleMiddleware("admin"))
-		{
-			adminRoutes.GET("/users", func(c *gin.Context) { handlers.AdminGetUsers(c, db) })
-			adminRoutes.POST("/users", func(c *gin.Context) { handlers.AdminCreateUser(c, db) })
-			adminRoutes.PUT("/users/:id", func(c *gin.Context) { handlers.AdminUpdateUser(c, db) })
-			adminRoutes.DELETE("/users/:id", func(c *gin.Context) { handlers.AdminDeleteUser(c, db) })
-			adminRoutes.GET("/groups", func(c *gin.Context) { handlers.AdminGetGroups(c, db) })
-		}
-	}
-}
+} 

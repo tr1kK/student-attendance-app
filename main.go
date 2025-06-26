@@ -30,4 +30,4 @@ func main() {
 	if err := r.Run(cfg.ServerAddress); err != nil {
 		log.Fatalf("could not start server: %v", err)
 	}
-} 
+}

@@ -1,8 +1,9 @@
 package config
 
 import (
-	"github.com/joho/godotenv"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -26,7 +27,7 @@ func LoadConfig() (*Config, error) {
 	serverAddr := os.Getenv("SERVER_ADDRESS")
 
 	if dbURL == "" {
-		dbURL = "postgres://user:password@localhost:5432/attendance_db?sslmode=disable"
+		dbURL = "postgres://postgres:1234@localhost:5432/attendance_db?sslmode=disable"
 	}
 	if jwtSecret == "" {
 		jwtSecret = "your-very-secret-key"
@@ -40,4 +41,4 @@ func LoadConfig() (*Config, error) {
 		JWTSecret:     jwtSecret,
 		ServerAddress: serverAddr,
 	}, nil
-} 
+}

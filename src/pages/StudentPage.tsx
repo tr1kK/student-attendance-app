@@ -2,117 +2,95 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Schedule from '../components/Schedule';
 import CodeEntryModal from '../components/CodeEntryModal';
-import { getCurrentUser } from '../utils/auth';
-import { 
-  getStudentAttendanceRecords, 
-  saveAttendanceRecord, 
-  isCodeValid,
-  setGeneratedCodes
-} from '../utils/storage';
-import { addMessageListener, removeMessageListener } from '../utils/broadcast';
-import type { Lesson, AttendanceRecord, GeneratedCode } from '../types';
-import type { User } from '../data/users';
+import * as api from '../utils/api';
+import type { Lesson, AttendanceRecord, User } from '../types';
 
 const StudentPage = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [lessons, setLessons] = useState<Lesson[]>([]);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const navigate = useNavigate();
-
+  
   useEffect(() => {
-    const user = getCurrentUser();
-    if (!user || user.role !== 'student') {
-      navigate('/');
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser);
+      setUser(parsedUser);
     } else {
-      setCurrentUser(user);
+      // If no user, redirect to login
+      navigate('/');
     }
-  }, [navigate]);
 
-  useEffect(() => {
-    if (currentUser) {
-      const records = getStudentAttendanceRecords(currentUser.id);
-      setAttendanceRecords(records);
-    }
-  }, [currentUser]);
-
-  useEffect(() => {
-    const handleSyncCodes = (event: MessageEvent) => {
-      if (event.data?.type === 'SYNC_CODES') {
-        const codes: GeneratedCode[] = event.data.payload;
-        setGeneratedCodes(codes); 
+    const fetchInitialData = async () => {
+      try {
+        const lessonsData = await api.getLessons();
+        setLessons(lessonsData);
+        
+        const attendanceData = await api.getStudentAttendance();
+        setAttendanceRecords(attendanceData);
+      } catch (err) {
+        setError('Не удалось загрузить данные.');
+        console.error(err);
       }
     };
-
-    addMessageListener(handleSyncCodes);
-    return () => removeMessageListener(handleSyncCodes);
-  }, []);
+    fetchInitialData();
+  }, [navigate]);
 
   const handleLessonClick = (lesson: Lesson) => {
     setSelectedLesson(lesson);
     setIsModalOpen(true);
   };
 
-  const handleCodeSubmit = (code: string) => {
-    if (!selectedLesson || !currentUser) return;
-
-    if (isCodeValid(code, selectedLesson.id)) {
-      const newRecord: AttendanceRecord = {
-        id: Date.now().toString(),
-        lessonId: selectedLesson.id,
-        lessonName: selectedLesson.name,
-        studentId: currentUser.id,
-        studentName: currentUser.name,
-        timestamp: new Date().toISOString(),
-        code: code
-      };
-
-      saveAttendanceRecord(newRecord);
-      setAttendanceRecords(prev => [...prev, newRecord]);
-      setMessage('Посещение успешно отмечено!');
-      setIsModalOpen(false);
-      setSelectedLesson(null);
+  const handleSubmitCode = async (code: string) => {
+    if (!selectedLesson) return;
+    try {
+      setError('');
+      setMessage('');
+      const response = await api.submitAttendance(selectedLesson.id, code);
+      setMessage(response.message || 'Посещение успешно отмечено!');
       
-      // Clear message after 3 seconds
-      setTimeout(() => setMessage(''), 3000);
-    } else {
-      setMessage('Неверный код. Попробуйте еще раз.');
-      setTimeout(() => setMessage(''), 3000);
+      // Refetch attendance records to update the UI
+      const updatedAttendance = await api.getStudentAttendance();
+      setAttendanceRecords(updatedAttendance);
+
+      setIsModalOpen(false);
+    } catch (err: any) {
+      setError(err.message || 'Ошибка при отправке кода.');
+    } finally {
+      setTimeout(() => {
+        setMessage('');
+        setError('');
+      }, 5000);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('currentUser');
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
     navigate('/');
   };
 
-  if (!currentUser) return null;
-
-  const attendedLessonIds = attendanceRecords.map(record => record.lessonId);
+  const attendedLessonIds = attendanceRecords.map(record => String(record.lesson_id));
 
   return (
-    <div className="student-page">
-      <header className="page-header">
-        <h1>Страница студента</h1>
+    <div className="container">
+      <header>
+        <h1>Портал студента</h1>
         <div className="user-info">
-          <span>Добро пожаловать, {currentUser.name}</span>
-          <button onClick={handleLogout} className="logout-btn">
-            Выйти
-          </button>
+          <span>Добро пожаловать, {user?.name || 'Студент'}</span>
+          <button onClick={handleLogout} className="logout-button">Выйти</button>
         </div>
       </header>
-
-      {message && (
-        <div className={`message ${message.includes('успешно') ? 'success' : 'error'}`}>
-          {message}
-        </div>
-      )}
-
-      <div className="page-content">
+      <main>
+        {message && <p className="message success">{message}</p>}
+        {error && <p className="error">{error}</p>}
         <Schedule 
+          lessons={lessons}
           onLessonClick={handleLessonClick}
-          showActions={true}
           userRole="student"
           attendedLessonIds={attendedLessonIds}
         />
@@ -126,16 +104,16 @@ const StudentPage = () => {
               {attendanceRecords.map(record => (
                 <div key={record.id} className="history-item">
                   <div className="history-info">
-                    <h4>{record.lessonName}</h4>
-                    <p>{new Date(record.timestamp).toLocaleDateString('ru-RU')}</p>
-                    <p>{new Date(record.timestamp).toLocaleTimeString('ru-RU')}</p>
+                    <h4>{record.lesson.name}</h4>
+                    <p>{new Date(record.submitted_at).toLocaleDateString('ru-RU')}</p>
+                    <p>{new Date(record.submitted_at).toLocaleTimeString('ru-RU')}</p>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
-      </div>
+      </main>
 
       {selectedLesson && (
         <CodeEntryModal
@@ -145,7 +123,7 @@ const StudentPage = () => {
             setIsModalOpen(false);
             setSelectedLesson(null);
           }}
-          onSubmit={handleCodeSubmit}
+          onSubmit={handleSubmitCode}
         />
       )}
     </div>
